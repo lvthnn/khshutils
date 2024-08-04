@@ -1,5 +1,8 @@
 #!/bin/bash
 
+set -e
+set -o pipefail
+
 PROGNAME=$(basename $0)
 TEMP=$(getopt --options 'd:f:hrv' \
               --long 'delim:,fields:,help,reverse,verbose' \
@@ -69,6 +72,7 @@ fi
 
 # Parse arguments from user
 
+# TODO port argument parsing over to getopts with manual long option parsing
 while true; do
   case "$1" in
     '-d'|'--delim')
@@ -130,4 +134,5 @@ for field in "${fields_usr[@]}"; do
   done
 done
 
+# TODO add support for reverse and warn flags
 awk -F "${delim}" "{ print ${fcut::-1} }" "${file}"
