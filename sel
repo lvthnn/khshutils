@@ -1,0 +1,133 @@
+#!/bin/bash
+
+PROGNAME=$(basename $0)
+TEMP=$(getopt --options 'd:f:hrv' \
+              --long 'delim:,fields:,help,reverse,verbose' \
+              --name 'selcol' -- "$@")
+
+#######################################
+# Print usage message to user.
+# Globals:
+#   None 
+# Arguments:
+#   None
+# Outputs:
+#   Writes help message to stdout
+#######################################
+
+usage() {
+  cat << HEREDOC
+  Extract fields from delimited files based on field name. 
+  
+  USAGE:
+    ${PROGNAME} [-f <fields>] [-d <delim>] [name ...]
+
+  OPTIONS:
+    -d, --delim <delim>    Delimiter separating fields in target file.
+    -f, --fields <fields>  Names of fields to cut from target file, separated
+                            by a comma with no space between.
+    -h, --help             Show this message and exit.
+    -r, --reverse          Returns fields that are not included in <fields>.
+    -w, --warn             Exit with error if any of the requested fields are
+                            not found in the specified data file.
+HEREDOC
+}
+
+#######################################
+# Format and print error message.
+# Globals:
+#   None 
+# Arguments:
+#   None
+# Outputs:
+#   Writes error message to stdout
+#######################################
+
+err () {
+  echo "${PROGNAME}: $*" >&2
+}
+
+# Set up variables
+
+delim=
+fields=
+file=
+out_path=
+reverse=''
+verbose=''
+
+eval set -- "${TEMP}"
+unset "${TEMP}"
+
+if [[ $? -ne 0 ]]; then
+  echo "Error parsing arguments. Terminating..." >&2
+  exit 1
+elif [[ $# -eq 1 ]]; then
+  usage
+  exit 0
+fi
+
+# Parse arguments from user
+
+while true; do
+  case "$1" in
+    '-d'|'--delim')
+      delim="$2"
+      shift 2
+      continue
+    ;;
+    '-f'|'--fields')
+      fields="$2"
+      shift 2
+      continue
+    ;;
+    '-h'|'--help')
+      usage
+      exit 0
+    ;;
+    '-r'|'--reverse')
+      reverse='true'
+      shift
+      continue
+    ;;
+    '-v'|'--verbose')
+      verbose='true'
+      shift
+      continue
+    ;;
+    '--')
+      file="$2"
+      shift 2
+      if [[ -z "${file}" ]]; then
+        err "Please provide a file to process."
+        exit 1
+      fi
+      break
+    ;;
+    *)
+      echo "Internal error!"
+      exit 1
+    ;;
+  esac
+done
+
+# Create associative list mapping field names to integer indices 
+
+fcut=''
+fcutr=''
+fields_req=$(echo "${fields}" | sed "s/,/\t/g")
+fields_all=$(head -n 1 "${file}" | sed "s/${delim}/\t/g")
+
+read -d '\t' -r -a fields_usr <<< "${fields_req}"
+read -d '\t' -r -a fields_arr <<< "${fields_all}"
+
+for field in "${fields_usr[@]}"; do
+  for i in "${!fields_arr[@]}"; do
+    ind=$(("${i}" + 1))
+    if [[ "${field}" == "${fields_arr[i]}" ]]; then
+      fcut+="\$${ind},"
+    fi
+  done
+done
+
+awk -F "${delim}" "{ print ${fcut::-1} }" "${file}"
