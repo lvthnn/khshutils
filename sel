@@ -4,9 +4,6 @@ set -e
 set -o pipefail
 
 PROGNAME=$(basename $0)
-TEMP=$(getopt --options 'd:f:hrv' \
-              --long 'delim:,fields:,help,reverse,verbose' \
-              --name 'selcol' -- "$@")
 
 #######################################
 # Print usage message to user.
@@ -20,19 +17,25 @@ TEMP=$(getopt --options 'd:f:hrv' \
 
 usage() {
   cat << HEREDOC
-  Extract fields from delimited files based on field name. 
+  Extract fields from delimited files based on string identifier. 
+
+  Extract fields from a delimited file based on the string identifiers
+  i.e. column names and print to standard output. The output data are
+  tab-delimited.
   
   USAGE:
-    ${PROGNAME} [-f <fields>] [-d <delim>] [name ...]
+    ${PROGNAME} [-d <delim>] [-f <fields>] [name ...]
 
   OPTIONS:
-    -d, --delim <delim>    Delimiter separating fields in target file.
+    -d, --delim <delim>    Delimiter separating fields in target file. Defaults
+                            to tab.
     -f, --fields <fields>  Names of fields to cut from target file, separated
                             by a comma with no space between.
     -h, --help             Show this message and exit.
-    -r, --reverse          Returns fields that are not included in <fields>.
+    -r, --reverse          Returns fields that are not specified in <fields>.
     -w, --warn             Exit with error if any of the requested fields are
-                            not found in the specified data file.
+                            not found in the target file.
+    -v, --verbose          Increase verbosity of command output.
 HEREDOC
 }
 
@@ -46,93 +49,117 @@ HEREDOC
 #   Writes error message to stdout
 #######################################
 
-err () {
+die () {
   echo "${PROGNAME}: $*" >&2
+  exit 2
 }
 
 # Set up variables
 
-delim=
+delim='\t'
 fields=
-file=
+input=
 out_path=
 reverse=''
 verbose=''
+warn=''
 
-eval set -- "${TEMP}"
-unset "${TEMP}"
+# Parse arguments from user
 
-if [[ $? -ne 0 ]]; then
-  echo "Error parsing arguments. Terminating..." >&2
-  exit 1
-elif [[ $# -eq 1 ]]; then
+if [[ $# -eq 0 ]]; then
   usage
   exit 0
 fi
 
-# Parse arguments from user
-
-# TODO port argument parsing over to getopts with manual long option parsing
-while true; do
-  case "$1" in
-    '-d'|'--delim')
-      delim="$2"
-      shift 2
-      continue
+while getopts ':d:f:hrvw-:' OPT; do
+  if [[ "${OPT}" = '-' ]]; then
+    OPT="${OPTARG%%=*}"         # parse option from <opt>=<val>
+    OPTARG="${OPTARG#"${OPT}"}" # remove option name, result =<val>
+    OPTARG="${OPTARG#=}"        # parse value from =<val>
+  fi
+  case "${OPT}" in
+    'd' | 'delim') 
+      delim="${OPTARG}"
     ;;
-    '-f'|'--fields')
-      fields="$2"
-      shift 2
-      continue
+    'f' | 'fields') 
+      fields="${OPTARG}"
     ;;
-    '-h'|'--help')
+    'h' | 'help')
       usage
       exit 0
     ;;
-    '-r'|'--reverse')
+    'r' | 'reverse')
       reverse='true'
-      shift
-      continue
     ;;
-    '-v'|'--verbose')
+    'v' | 'verbose')
       verbose='true'
-      shift
-      continue
     ;;
-    '--')
-      file="$2"
-      shift 2
-      if [[ -z "${file}" ]]; then
-        err "Please provide a file to process."
-        exit 1
-      fi
-      break
+    'w' | 'warn')
+      warn='true'
+    ;;
+    ':')
+      die "option requires an argument -- ${OPTARG}"
     ;;
     *)
-      echo "Internal error!"
-      exit 1
+      die "invalid option -- ${OPTARG}" 
     ;;
   esac
 done
+shift $((OPTIND-1))
+
+if [[ $# -eq 1 ]]; then 
+  input=$1
+elif [[ -p /dev/stdin ]]; then
+  input="/dev/stdin"
+else
+  die "missing file argument"
+fi
+
+if [[ "${verbose}" = true ]]; then
+  echo "Parsed arguments"
+  echo "----------------"
+  echo "input: ${input}"
+  echo "fields: ${fields}"
+  echo "delim: ${delim}"
+  echo "reverse: ${reverse}"
+  echo "warn: ${warn}"
+fi
 
 # Create associative list mapping field names to integer indices 
 
 fcut=''
 fcutr=''
 fields_req=$(echo "${fields}" | sed "s/,/\t/g")
-fields_all=$(head -n 1 "${file}" | sed "s/${delim}/\t/g")
+fields_all=$(head -n 1 "${input}" | sed "s/${delim}/\t/g")
 
-read -d '\t' -r -a fields_usr <<< "${fields_req}"
-read -d '\t' -r -a fields_arr <<< "${fields_all}"
+IFS=$'\t' read -r -a fields_usr <<< "${fields_req}"
+IFS=$'\t' read -r -a fields_arr <<< "${fields_all}"
 
 for field in "${fields_usr[@]}"; do
+  found=''
+
   for i in "${!fields_arr[@]}"; do
     ind=$(("${i}" + 1))
     if [[ "${field}" == "${fields_arr[i]}" ]]; then
       fcut+="\$${ind},"
+      found='true'
+      break
     fi
   done
+
+  if [[ -z "${found}" && ! -z "${warn}" ]]; then 
+    die "field ${field} not found in input file"
+  fi
 done
 
-# TODO add support for reverse and warn flags
-awk -F "${delim}" "{ print ${fcut::-1} }" "${file}"
+# Print the header separately to avoid no header when input is from pipe
+
+# head=$(head -n 1 "${input}" |
+#   cut -d "${delim}" -f $(echo "${fcut::-1}" | sed 's/\$//g') |
+#   sed "s/${delim}/ /g")
+
+head=$(echo "${fields_req}" | sed 's/,/\t/g')
+
+data=$(awk -F "${delim}" "{ print ${fcut::-1} }" "${input}" | tail -n +2)
+
+echo -e "${head}\n${data}" | column -t
