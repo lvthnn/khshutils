@@ -3,6 +3,8 @@
 Various utilities I use for data processing in bash.
 
 ## to-do
-- [ ] use `getopts` for option parsing for cross-compatibility
+- [x] use `getopts` for option parsing for cross-compatibility
 - [ ] implement `--reverse` and `--warn` flags in `sel`
-- [ ] allow user to pipe into `sel`
+  - [x] `--warn`
+  - [ ] `--reverse`
+- [x] allow user to pipe into `sel`
